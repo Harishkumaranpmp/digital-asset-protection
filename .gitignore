@@ -1,0 +1,26 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+venv/
+.venv/
+env/
+.env
+
+# Database
+sportshield.db
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Frontend (if mixed)
+node_modules/
+.next/
+dist/
+build/
+.vercel
+
+# Logs
+logs/
+*.log

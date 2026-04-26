@@ -112,7 +112,7 @@ app.add_middleware(
 
 # Block requests from unexpected hosts in production
 if is_production:
-    app.add_middleware(TrustedHostMiddleware, allowed_hosts=["*.run.app", "localhost", "127.0.0.1"])
+    app.add_middleware(TrustedHostMiddleware, allowed_hosts=["*.run.app", "*.onrender.com", "localhost", "127.0.0.1"])
 
 
 # ── API Routers ─────────────────────────────────────────────

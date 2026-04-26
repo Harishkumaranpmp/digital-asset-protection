@@ -31,15 +31,17 @@ def seed():
         if not org:
             org = Organization(
                 name="SportShield Demo",
+                slug="sportshield-demo",
                 plan="enterprise",
-                asset_limit=10000,
-                monthly_scans=50000,
+                api_key="demo-api-key-12345",
+                max_assets=10000,
+                max_scans_per_month=50000,
             )
             db.add(org)
             db.flush()
-            print(f"[Seed] ✅ Created organization: SportShield Demo (ID: {org.id})")
+            print(f"[Seed] Created organization: SportShield Demo (ID: {org.id})")
         else:
-            print(f"[Seed] ⏭  Organization already exists (ID: {org.id})")
+            print(f"[Seed] Organization already exists (ID: {org.id})")
 
         # ── Seed Admin User ──────────────────────────────────
         admin_email = os.getenv("ADMIN_EMAIL", "admin@sportshield.ai")
@@ -51,24 +53,24 @@ def seed():
                 email=admin_email,
                 username="admin",
                 full_name="SportShield Administrator",
-                hashed_password=pwd_ctx.hash(admin_password),
+                password_hash=pwd_ctx.hash(admin_password),
                 role="admin",
                 org_id=org.id,
                 is_active=True,
             )
             db.add(admin)
-            print(f"[Seed] ✅ Created admin user: {admin_email}")
-            print(f"[Seed] 🔑 Default password: {admin_password}")
-            print(f"[Seed] ⚠️  CHANGE THIS PASSWORD immediately after first login!")
+            print(f"[Seed] Created admin user: {admin_email}")
+            print(f"[Seed] Default password: {admin_password}")
+            print(f"[Seed] CHANGE THIS PASSWORD immediately after first login!")
         else:
-            print(f"[Seed] ⏭  Admin user already exists: {admin_email}")
+            print(f"[Seed] Admin user already exists: {admin_email}")
 
         db.commit()
-        print("[SportShield Seed] 🚀 Database seeded successfully!")
+        print("[SportShield Seed] Database seeded successfully!")
 
     except Exception as e:
         db.rollback()
-        print(f"[SportShield Seed] ❌ Error: {e}")
+        print(f"[SportShield Seed] Error: {e}")
         raise
     finally:
         db.close()

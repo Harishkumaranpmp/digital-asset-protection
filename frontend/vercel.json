@@ -9,12 +9,6 @@
     "NEXT_PUBLIC_APP_NAME": "SportShield",
     "NEXT_PUBLIC_APP_VERSION": "1.0.0"
   },
-  "rewrites": [
-    {
-      "source": "/api/:path*",
-      "destination": "https://sportshield-api-REPLACE.run.app/api/:path*"
-    }
-  ],
   "headers": [
     {
       "source": "/(.*)",
@@ -29,7 +23,7 @@
         },
         {
           "key": "Content-Security-Policy",
-          "value": "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: blob:; connect-src 'self' https://*.run.app;"
+          "value": "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: blob:; connect-src 'self' https://*.onrender.com https://*.run.app;"
         }
       ]
     }
