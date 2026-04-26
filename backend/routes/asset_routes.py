@@ -60,16 +60,24 @@ async def upload_asset(
 
     file_type = "image" if is_image else "video"
 
-    # Save file with UUID
+    # Save file with UUID (Streaming to prevent OOM)
     ext = Path(file.filename or "asset").suffix
     unique_filename = f"{uuid4().hex}{ext}"
     file_path = os.path.join(settings.UPLOAD_DIR, unique_filename)
 
-    content = await file.read()
-    file_size = len(content)
-
-    with open(file_path, "wb") as f:
-        f.write(content)
+    file_size = 0
+    try:
+        with open(file_path, "wb") as f:
+            while True:
+                chunk = await file.read(1024 * 1024)  # 1MB chunks
+                if not chunk:
+                    break
+                f.write(chunk)
+                file_size += len(chunk)
+    except Exception as e:
+        if os.path.exists(file_path):
+            os.remove(file_path)
+        raise HTTPException(status_code=500, detail=f"File save failed: {str(e)}")
 
     # Gemini analysis (async, non-blocking)
     gemini_result = None
