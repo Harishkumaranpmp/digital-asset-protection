@@ -11,8 +11,9 @@ from pathlib import Path
 from typing import List, Optional
 from uuid import uuid4
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, BackgroundTasks
 from fastapi.responses import FileResponse
+from PIL import Image
 from sqlalchemy.orm import Session
 
 from backend.auth import get_current_user
@@ -44,6 +45,7 @@ async def upload_asset(
     sport_category: Optional[str] = Form(None),
     event_name: Optional[str] = Form(None),
     protection_level: str = Form("standard"),
+    background_tasks: BackgroundTasks,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
@@ -79,13 +81,8 @@ async def upload_asset(
             os.remove(file_path)
         raise HTTPException(status_code=500, detail=f"File save failed: {str(e)}")
 
-    # Gemini analysis (async, non-blocking)
-    gemini_result = None
-    if is_image:
-        try:
-            gemini_result = gemini.analyze_image(file_path)
-        except Exception:
-            pass
+    # Gemini analysis and Fingerprinting are now handled in the background task
+    # to keep the upload response fast and responsive for the CEO demo.
 
     # Parse tags
     tag_list = []
@@ -114,6 +111,24 @@ async def upload_asset(
         protection_level=protection_level,
         status="processing", # Set to processing initially
     )
+
+    # Generate thumbnail
+    thumb_filename = f"{unique_filename}.jpg"
+    thumb_path = os.path.join(settings.UPLOAD_DIR, "thumbnails", thumb_filename)
+    
+    if is_image:
+        try:
+            with Image.open(file_path) as img:
+                img.thumbnail((400, 400))
+                img.convert("RGB").save(thumb_path, "JPEG")
+            asset.thumbnail_path = f"/uploads/thumbnails/{thumb_filename}"
+        except Exception as e:
+            print(f"Thumbnail generation failed: {e}")
+            asset.thumbnail_path = None
+    else:
+        # For videos, we'd normally use ffmpeg. For the demo, we set a placeholder.
+        asset.thumbnail_path = "/assets/video-placeholder.jpg"
+
     db.add(asset)
     db.flush()
 
@@ -130,11 +145,16 @@ async def upload_asset(
     db.commit()
     db.refresh(asset)
     
-    # Enqueue Celery task
+    # Background Processing (Fallback to BackgroundTasks if Celery is unavailable)
+    def run_processing(asset_id: int):
+        from backend.celery_app import process_asset_task
+        process_asset_task(asset_id)
+
     try:
         process_asset_task.delay(asset.id)
-    except Exception as e:
-        print(f"Warning: Failed to enqueue celery task: {e}")
+    except Exception:
+        # Fallback to FastAPI BackgroundTasks for environments without Redis
+        background_tasks.add_task(run_processing, asset.id)
 
     return {
         "id": asset.id,

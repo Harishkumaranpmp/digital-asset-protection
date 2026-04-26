@@ -128,7 +128,7 @@ app.include_router(reports_router)       # /api/reports/*
 
 # ─── Health Check ────────────────────────────────────────────
 
-@app.get("/", tags=["Health"])
+@app.api_route("/", methods=["GET", "HEAD"], tags=["Health"])
 def root():
     return {
         "service": "SportShield API",
