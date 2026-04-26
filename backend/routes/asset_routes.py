@@ -11,9 +11,8 @@ from pathlib import Path
 from typing import List, Optional
 from uuid import uuid4
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, BackgroundTasks
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse
-from PIL import Image
 from sqlalchemy.orm import Session
 
 from backend.auth import get_current_user
@@ -45,7 +44,6 @@ async def upload_asset(
     sport_category: Optional[str] = Form(None),
     event_name: Optional[str] = Form(None),
     protection_level: str = Form("standard"),
-    background_tasks: BackgroundTasks,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
@@ -61,28 +59,35 @@ async def upload_asset(
         raise HTTPException(status_code=400, detail=f"Unsupported file type: {mime}")
 
     file_type = "image" if is_image else "video"
+    
+    # Check file size (FastAPI doesn't do this by default)
+    max_bytes = settings.MAX_FILE_SIZE_MB * 1024 * 1024
+    content = await file.read()
+    file_size = len(content)
+    
+    if file_size > max_bytes:
+        raise HTTPException(
+            status_code=413, 
+            detail=f"File too large. Max allowed: {settings.MAX_FILE_SIZE_MB}MB"
+        )
+    
 
-    # Save file with UUID (Streaming to prevent OOM)
+    # Save file with UUID
     ext = Path(file.filename or "asset").suffix
     unique_filename = f"{uuid4().hex}{ext}"
     file_path = os.path.join(settings.UPLOAD_DIR, unique_filename)
 
-    file_size = 0
-    try:
-        with open(file_path, "wb") as f:
-            while True:
-                chunk = await file.read(1024 * 1024)  # 1MB chunks
-                if not chunk:
-                    break
-                f.write(chunk)
-                file_size += len(chunk)
-    except Exception as e:
-        if os.path.exists(file_path):
-            os.remove(file_path)
-        raise HTTPException(status_code=500, detail=f"File save failed: {str(e)}")
 
-    # Gemini analysis and Fingerprinting are now handled in the background task
-    # to keep the upload response fast and responsive for the CEO demo.
+    with open(file_path, "wb") as f:
+        f.write(content)
+
+    # Gemini analysis (async, non-blocking)
+    gemini_result = None
+    if is_image:
+        try:
+            gemini_result = gemini.analyze_image(file_path)
+        except Exception:
+            pass
 
     # Parse tags
     tag_list = []
@@ -111,24 +116,6 @@ async def upload_asset(
         protection_level=protection_level,
         status="processing", # Set to processing initially
     )
-
-    # Generate thumbnail
-    thumb_filename = f"{unique_filename}.jpg"
-    thumb_path = os.path.join(settings.UPLOAD_DIR, "thumbnails", thumb_filename)
-    
-    if is_image:
-        try:
-            with Image.open(file_path) as img:
-                img.thumbnail((400, 400))
-                img.convert("RGB").save(thumb_path, "JPEG")
-            asset.thumbnail_path = f"/uploads/thumbnails/{thumb_filename}"
-        except Exception as e:
-            print(f"Thumbnail generation failed: {e}")
-            asset.thumbnail_path = None
-    else:
-        # For videos, we'd normally use ffmpeg. For the demo, we set a placeholder.
-        asset.thumbnail_path = "/assets/video-placeholder.jpg"
-
     db.add(asset)
     db.flush()
 
@@ -145,16 +132,16 @@ async def upload_asset(
     db.commit()
     db.refresh(asset)
     
-    # Background Processing (Fallback to BackgroundTasks if Celery is unavailable)
-    def run_processing(asset_id: int):
-        from backend.celery_app import process_asset_task
-        process_asset_task(asset_id)
-
+    # Enqueue Celery task with a synchronous fallback for demo/environments without Redis
     try:
         process_asset_task.delay(asset.id)
-    except Exception:
-        # Fallback to FastAPI BackgroundTasks for environments without Redis
-        background_tasks.add_task(run_processing, asset.id)
+    except Exception as e:
+        print(f"Warning: Failed to enqueue celery task: {e}. Running synchronously...")
+        # If background processing fails, we run it synchronously so the user isn't stuck "Processing"
+        try:
+            process_asset_task(asset.id)
+        except Exception as se:
+            print(f"Critical: Synchronous processing failed: {se}")
 
     return {
         "id": asset.id,
