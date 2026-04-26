@@ -97,7 +97,15 @@ export default function UploadPage() {
         );
         toast.success(`✅ ${files[i].file.name} protected!`);
       } catch (err: any) {
-        const msg = err.response?.data?.detail || "Upload failed";
+        let msg = "Upload failed";
+        if (err.response) {
+          msg = err.response.data?.detail || `Server error (${err.response.status})`;
+        } else if (err.request) {
+          msg = "Network error: Connection to server lost or timed out";
+        } else {
+          msg = err.message;
+        }
+
         setFiles((prev) =>
           prev.map((f, idx) => idx === i ? { ...f, status: "error", error: msg } : f)
         );
