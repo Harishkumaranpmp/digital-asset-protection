@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { motion } from "framer-motion";
 import {
   Shield, AlertTriangle, Eye, Gavel, TrendingUp, Activity,
-  Globe, Zap, RefreshCw, ChevronRight, Clock
+  Globe, Zap, RefreshCw, ChevronRight, Clock, Sparkles
 } from "lucide-react";
 import Link from "next/link";
 import {
@@ -96,6 +96,19 @@ export default function DashboardPage() {
     return () => clearInterval(interval);
   }, []);
 
+  const handleSeedDemo = async () => {
+    try {
+      setRefreshing(true);
+      await detectionsAPI.seedDemo();
+      await loadData();
+      toast.success("Demo data seeded successfully!");
+    } catch (err: any) {
+      toast.error(err.response?.data?.detail || "Make sure you have uploaded at least one asset first.");
+    } finally {
+      setRefreshing(false);
+    }
+  };
+
   const handleRefresh = async () => {
     setRefreshing(true);
     await loadData();
@@ -139,6 +152,13 @@ export default function DashboardPage() {
           </p>
         </div>
         <div className="flex gap-3">
+          <button
+            onClick={handleSeedDemo}
+            disabled={refreshing}
+            className="btn-secondary py-2 px-4 text-sm border-purple-500/30 text-purple-400 hover:bg-purple-500/10"
+          >
+            <Sparkles className="w-4 h-4" /> Seed Demo
+          </button>
           <button
             onClick={handleRefresh}
             disabled={refreshing}
