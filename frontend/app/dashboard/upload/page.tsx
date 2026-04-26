@@ -98,14 +98,12 @@ export default function UploadPage() {
         toast.success(`✅ ${files[i].file.name} protected!`);
       } catch (err: any) {
         let msg = "Upload failed";
-        if (err.response) {
-          msg = err.response.data?.detail || `Server error (${err.response.status})`;
-        } else if (err.request) {
-          msg = "Network error: Connection to server lost or timed out";
-        } else {
-          msg = err.message;
+        if (err.response?.data?.detail) {
+          msg = typeof err.response.data.detail === "string"
+            ? err.response.data.detail
+            : JSON.stringify(err.response.data.detail);
         }
-
+        
         setFiles((prev) =>
           prev.map((f, idx) => idx === i ? { ...f, status: "error", error: msg } : f)
         );
@@ -205,7 +203,7 @@ export default function UploadPage() {
                       )}
                       {f.status === "success" && f.result && (
                         <p className="text-xs text-emerald-400 mt-1">
-                          Fingerprint: {f.result.fingerprint?.phash?.slice(0, 12)}...
+                          Fingerprint: {f.result.fingerprint?.phash ? `${f.result.fingerprint.phash.slice(0, 12)}...` : 'Generating...'}
                         </p>
                       )}
                       {f.status === "error" && (
