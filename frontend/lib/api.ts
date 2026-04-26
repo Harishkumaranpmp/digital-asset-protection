@@ -58,9 +58,7 @@ export const authAPI = {
 
 export const assetsAPI = {
   upload: (formData: FormData) =>
-    api.post("/api/assets/upload", formData, {
-      headers: { "Content-Type": "multipart/form-data" },
-    }),
+    api.post("/api/assets/upload", formData),
   list: (params?: Record<string, any>) => api.get("/api/assets/", { params }),
   get: (id: number) => api.get(`/api/assets/${id}`),
   delete: (id: number) => api.delete(`/api/assets/${id}`),
