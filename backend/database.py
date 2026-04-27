@@ -237,4 +237,14 @@ class Alert(Base):
 
 def create_tables():
     """Create all database tables."""
-    Base.metadata.create_all(bind=engine)
+    import logging
+    logger = logging.getLogger(__name__)
+    
+    try:
+        Base.metadata.create_all(bind=engine)
+        logger.info("Database tables created successfully.")
+    except Exception as e:
+        logger.error(f"Failed to create database tables: {e}")
+        # In production, you might want to exit or handle this differently
+        # For now, we'll log and continue (app will fail on first DB query)
+        raise

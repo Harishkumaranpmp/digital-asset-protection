@@ -50,7 +50,14 @@ except ImportError:
 async def lifespan(app: FastAPI):
     """Application startup / shutdown lifecycle."""
     # Initialize database
-    create_tables()
+    try:
+        create_tables()
+        logger.info("Database initialized successfully.")
+    except Exception as e:
+        logger.error(f"Database initialization failed: {e}")
+        logger.error("Please check your DATABASE_URL environment variable and ensure the database is accessible.")
+        logger.error(f"Current DATABASE_URL: {settings.DATABASE_URL[:30]}..." if len(settings.DATABASE_URL) > 30 else f"Current DATABASE_URL: {settings.DATABASE_URL}")
+        raise
     
     # Ensure upload directories exist
     Path(settings.UPLOAD_DIR).mkdir(parents=True, exist_ok=True)
