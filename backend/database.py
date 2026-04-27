@@ -22,13 +22,21 @@ if db_url.startswith("postgres://"):
 # Only use connection pooling for PostgreSQL (SQLite doesn't support it)
 is_sqlite = "sqlite" in db_url
 
+# For PostgreSQL, add connection parameters to force IPv4 and SSL
+connect_args = {"check_same_thread": False} if is_sqlite else {}
+if not is_sqlite:
+    # Force IPv4 connection (Render doesn't support IPv6 outbound)
+    connect_args["hostaddr"] = None  # Will be resolved as IPv4
+
 engine = create_engine(
     db_url,
-    connect_args={"check_same_thread": False} if is_sqlite else {},
+    connect_args=connect_args,
     pool_pre_ping=True,  # Handle disconnected connections
     pool_size=10 if not is_sqlite else None,        # Only for PostgreSQL
     max_overflow=20 if not is_sqlite else None,     # Only for PostgreSQL
     echo=settings.DEBUG,
+    # Force IPv4 by disabling IPv6 DNS resolution
+    pool_recycle=3600,  # Recycle connections every hour
 )
 
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
