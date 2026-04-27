@@ -69,10 +69,11 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
 
 # Production server: Gunicorn + Uvicorn workers
 # Workers = (2 * CPU_CORES) + 1 — set via environment variable
+# Use $PORT for Render/Cloud Run compatibility
 CMD sh -c 'gunicorn backend.main:app \
      --worker-class uvicorn.workers.UvicornWorker \
      --workers ${GUNICORN_WORKERS:-2} \
-     --bind 0.0.0.0:8000 \
+     --bind 0.0.0.0:${PORT:-8000} \
      --timeout 120 \
      --keep-alive 5 \
      --max-requests 1000 \
