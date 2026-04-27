@@ -6,6 +6,7 @@ The central API gateway for the Digital Asset Protection Platform
 import os
 import logging
 from contextlib import asynccontextmanager
+from datetime import datetime, timezone
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
@@ -151,7 +152,7 @@ def root():
 
 @app.get("/health", tags=["Health"])
 def health():
-    return {"status": "healthy", "timestamp": __import__("datetime").datetime.utcnow().isoformat()}
+    return {"status": "healthy", "timestamp": datetime.now(timezone.utc).isoformat()}
 
 
 # ─── Serve Uploads (Static Files) ─────────────────────────────

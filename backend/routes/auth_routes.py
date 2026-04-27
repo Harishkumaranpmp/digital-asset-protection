@@ -4,7 +4,7 @@ Handles user registration, login, profile management
 """
 
 import secrets
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -107,7 +107,7 @@ def login(req: LoginRequest, db: Session = Depends(get_db)):
         raise HTTPException(status_code=403, detail="Account is deactivated")
 
     # Update last login
-    user.last_login = datetime.utcnow()
+    user.last_login = datetime.now(timezone.utc)
     db.commit()
 
     token = create_access_token({"sub": str(user.id), "role": user.role})

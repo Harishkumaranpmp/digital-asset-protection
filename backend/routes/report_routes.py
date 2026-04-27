@@ -5,7 +5,7 @@ Real-time alerts and PDF/CSV report generation
 
 import csv
 import io
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -123,7 +123,7 @@ def export_detections_csv(
         ])
 
     output.seek(0)
-    filename = f"sportshield_detections_{datetime.utcnow().strftime('%Y%m%d')}.csv"
+    filename = f"sportshield_detections_{datetime.now(timezone.utc).strftime('%Y%m%d')}.csv"
     return StreamingResponse(
         io.BytesIO(output.getvalue().encode()),
         media_type="text/csv",
@@ -162,7 +162,7 @@ def export_assets_csv(
         ])
 
     output.seek(0)
-    filename = f"sportshield_assets_{datetime.utcnow().strftime('%Y%m%d')}.csv"
+    filename = f"sportshield_assets_{datetime.now(timezone.utc).strftime('%Y%m%d')}.csv"
     return StreamingResponse(
         io.BytesIO(output.getvalue().encode()),
         media_type="text/csv",
@@ -213,7 +213,7 @@ def executive_summary(
     resolved_cases = case_base.filter(EnforcementCase.status == "resolved").count()
 
     return {
-        "generated_at": datetime.utcnow().isoformat(),
+        "generated_at": datetime.now(timezone.utc).isoformat(),
         "period": "All time",
         "assets": {
             "total": total_assets,
@@ -248,7 +248,7 @@ def export_executive_pdf(
     summary_data = executive_summary(current_user, db)
     pdf_buffer = PDFGenerator.generate_executive_report(summary_data)
     
-    filename = f"sportshield_executive_report_{datetime.utcnow().strftime('%Y%m%d')}.pdf"
+    filename = f"sportshield_executive_report_{datetime.now(timezone.utc).strftime('%Y%m%d')}.pdf"
     return StreamingResponse(
         pdf_buffer, 
         media_type="application/pdf",

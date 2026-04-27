@@ -6,7 +6,7 @@ DMCA notices, legal case management, and takedown workflows
 import secrets
 import smtplib
 from email.message import EmailMessage
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -180,7 +180,7 @@ def create_case(
         raise HTTPException(status_code=409, detail="Enforcement case already exists for this detection")
 
     # Generate case number
-    case_number = f"SS-{datetime.utcnow().strftime('%Y%m')}-{secrets.token_hex(3).upper()}"
+    case_number = f"SS-{datetime.now(timezone.utc).strftime('%Y%m')}-{secrets.token_hex(3).upper()}"
 
     case = EnforcementCase(
         detection_id=req.detection_id,
@@ -220,7 +220,7 @@ def generate_notice(
     org_name = org.name if org else (user.full_name or user.username)
 
     vars = {
-        "date": datetime.utcnow().strftime("%B %d, %Y"),
+        "date": datetime.now(timezone.utc).strftime("%B %d, %Y"),
         "case_number": case.case_number,
         "platform": detection.platform or "Unknown Platform",
         "respondent": case.respondent_name or detection.domain or "Content Owner",
@@ -232,7 +232,7 @@ def generate_notice(
         "org_name": org_name,
         "asset_id": str(asset.id),
         "fingerprint": asset.phash or "N/A",
-        "generated_at": datetime.utcnow().isoformat(),
+        "generated_at": datetime.now(timezone.utc).isoformat(),
     }
 
     template = DMCA_TEMPLATE if case.case_type == "dmca" else CEASE_DESIST_TEMPLATE
@@ -268,7 +268,7 @@ def download_notice_pdf(
 
     data = {
         "notice_title": "DMCA TAKEDOWN NOTICE" if case.case_type == "dmca" else "CEASE AND DESIST NOTICE",
-        "date": datetime.utcnow().strftime("%B %d, %Y"),
+        "date": datetime.now(timezone.utc).strftime("%B %d, %Y"),
         "case_number": case.case_number,
         "platform": detection.platform or "Unknown Platform",
         "respondent": case.respondent_name or detection.domain or "Content Owner",
@@ -279,7 +279,7 @@ def download_notice_pdf(
         "owner_name": user.full_name or user.username,
         "org_name": org_name,
         "fingerprint": asset.phash or "N/A",
-        "generated_at": datetime.utcnow().isoformat(),
+        "generated_at": datetime.now(timezone.utc).isoformat(),
     }
 
     pdf_buffer = PDFGenerator.generate_legal_notice(data)
@@ -325,7 +325,7 @@ def send_notice(
             # For this demo, we'll just print and continue
 
     case.status = "sent"
-    case.notice_sent_at = datetime.utcnow()
+    case.notice_sent_at = datetime.now(timezone.utc)
     db.commit()
 
     # Update detection status
@@ -368,7 +368,7 @@ def update_case(
     if req.status:
         case.status = req.status
         if req.status == "resolved":
-            case.resolved_at = datetime.utcnow()
+            case.resolved_at = datetime.now(timezone.utc)
     if req.resolution_notes:
         case.resolution_notes = req.resolution_notes
 

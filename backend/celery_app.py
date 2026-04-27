@@ -27,6 +27,9 @@ def process_asset_task(asset_id: int):
     from backend.database import SessionLocal, Asset, Detection
     from ai_models.fingerprint_generator import FingerprintGenerator
     from ai_models.duplicate_detector import DuplicateDetector
+    import cv2
+    import os
+    from pathlib import Path
     
     db = SessionLocal()
     try:
@@ -42,6 +45,23 @@ def process_asset_task(asset_id: int):
         asset.ahash = fp.get("ahash")
         asset.hash_algorithm = "imagehash_v1" if asset.file_type == "image" else "video_hash_v1"
         asset.status = "protected"
+        
+        # Generate thumbnail for videos
+        if asset.file_type == "video":
+            try:
+                from backend.config import get_settings
+                settings = get_settings()
+                thumbnail_path = os.path.join(settings.UPLOAD_DIR, "thumbnails", f"{asset.filename}_thumb.jpg")
+                
+                # Extract first frame as thumbnail
+                cap = cv2.VideoCapture(asset.file_path)
+                ret, frame = cap.read()
+                if ret:
+                    cv2.imwrite(thumbnail_path, frame)
+                    asset.thumbnail_path = thumbnail_path
+                cap.release()
+            except Exception as e:
+                print(f"Warning: Failed to generate video thumbnail: {e}")
         
         # Trigger duplicate scan immediately against other assets in the DB
         other_assets = db.query(Asset).filter(Asset.id != asset.id).all()
@@ -96,16 +116,21 @@ def run_platform_scan_task(asset_id: int, platforms: list = None):
             return {"status": "error", "message": f"Asset {asset_id} not found"}
 
         # Run the crawler in a new event loop since Celery is sync
-        loop = asyncio.get_event_loop()
-        detections = loop.run_until_complete(
-            crawler.scan_asset(
-                asset_id=asset.id,
-                phash=asset.phash,
-                title=asset.title,
-                tags=asset.tags
+        try:
+            # Python 3.10+ compatible approach
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            detections = loop.run_until_complete(
+                crawler.scan_asset(
+                    asset_id=asset.id,
+                    phash=asset.phash,
+                    title=asset.title,
+                    tags=asset.tags
+                )
             )
-        )
-        loop.run_until_complete(crawler.close())
+            loop.run_until_complete(crawler.close())
+        finally:
+            loop.close()
 
         # Save detections to DB
         saved_count = 0

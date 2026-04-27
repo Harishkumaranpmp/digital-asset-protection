@@ -5,7 +5,7 @@ Manages detected infringements, similarity scores, and threat tracking
 
 import json
 import random
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, File, UploadFile
@@ -21,9 +21,6 @@ from backend.ai.fingerprint import FingerprintEngine
 from backend.ai.crawler import WebCrawler
 from backend.celery_app import run_platform_scan_task
 from backend.config import get_settings
-
-from ai_models.fingerprint_generator import FingerprintGenerator
-from ai_models.duplicate_detector import DuplicateDetector
 
 router = APIRouter(prefix="/api/detections", tags=["Detections"])
 fingerprint_engine = FingerprintEngine()
@@ -111,7 +108,7 @@ def update_detection(
     if req.status:
         detection.status = req.status
         if req.status == "resolved":
-            detection.resolved_at = datetime.utcnow()
+            detection.resolved_at = datetime.now(timezone.utc)
 
     db.commit()
     db.refresh(detection)
@@ -147,15 +144,33 @@ async def detect_ad_hoc_upload(
         mime = file.content_type or ""
         file_type = "image" if mime.startswith("image/") else "video"
         
-        # Generate fingerprint
-        fp = FingerprintGenerator.generate(temp_path, file_type)
+        # Generate fingerprint using FingerprintEngine
+        fp = fingerprint_engine.generate_image_fingerprint(temp_path) if file_type == "image" else fingerprint_engine.generate_video_fingerprint(temp_path)
         
-        # Scan database
+        # Scan database using built-in comparison
         db_assets = db.query(Asset).filter(
             Asset.org_id == current_user.org_id if current_user.org_id else Asset.user_id == current_user.id
         ).all()
         
-        duplicates = DuplicateDetector.scan_database(fp, db_assets)
+        duplicates = []
+        for asset in db_assets:
+            if not asset.phash:
+                continue
+            
+            ref_fp = {"phash": asset.phash, "dhash": asset.dhash, "ahash": asset.ahash}
+            comparison = fingerprint_engine.compare_fingerprints(fp, ref_fp)
+            
+            if comparison["match_type"] != "no_match":
+                duplicates.append({
+                    "asset_id": asset.id,
+                    "title": asset.title,
+                    "filename": asset.original_filename,
+                    "similarity_score": comparison["similarity_score"] * 100,
+                    "match_type": comparison["match_type"],
+                    "platform": "internal_database",
+                })
+        
+        duplicates.sort(key=lambda x: x["similarity_score"], reverse=True)
         
         return {
             "status": "success",
@@ -286,7 +301,7 @@ def detection_stats(
     # Recent 7 days trend
     trend = []
     for i in range(7):
-        day = datetime.utcnow() - timedelta(days=6-i)
+        day = datetime.now(timezone.utc) - timedelta(days=6-i)
         count = base_query.filter(
             Detection.detected_at >= day.replace(hour=0, minute=0, second=0),
             Detection.detected_at < (day + timedelta(days=1)).replace(hour=0, minute=0, second=0)
@@ -347,7 +362,7 @@ def seed_demo_detections(
                 match_type="exact" if sim > 0.95 else "modified" if sim > 0.80 else "partial",
                 severity="critical" if sim > 0.95 else "high" if sim > 0.85 else "medium" if sim > 0.70 else "low",
                 status="active",
-                detected_at=datetime.utcnow() - timedelta(hours=random.randint(1, 168)),
+                detected_at=datetime.now(timezone.utc) - timedelta(hours=random.randint(1, 168)),
             )
             db.add(det)
             count += 1

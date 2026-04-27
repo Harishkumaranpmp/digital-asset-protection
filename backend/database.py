@@ -19,12 +19,15 @@ db_url = settings.DATABASE_URL
 if db_url.startswith("postgres://"):
     db_url = db_url.replace("postgres://", "postgresql://", 1)
 
+# Only use connection pooling for PostgreSQL (SQLite doesn't support it)
+is_sqlite = "sqlite" in db_url
+
 engine = create_engine(
     db_url,
-    connect_args={"check_same_thread": False} if "sqlite" in db_url else {},
+    connect_args={"check_same_thread": False} if is_sqlite else {},
     pool_pre_ping=True,  # Handle disconnected connections
-    pool_size=10,        # Increase pool for production
-    max_overflow=20,
+    pool_size=10 if not is_sqlite else None,        # Only for PostgreSQL
+    max_overflow=20 if not is_sqlite else None,     # Only for PostgreSQL
     echo=settings.DEBUG,
 )
 
@@ -82,10 +85,14 @@ class User(Base):
 
 class Asset(Base):
     __tablename__ = "assets"
+    __table_args__ = (
+        # Indexes for frequently queried columns
+        {"sqlite_autoincrement": True},
+    )
     
     id = Column(Integer, primary_key=True, index=True)
-    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
-    org_id = Column(Integer, ForeignKey("organizations.id"), nullable=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    org_id = Column(Integer, ForeignKey("organizations.id"), nullable=True, index=True)
     
     # File info
     filename = Column(String(500), nullable=False)
@@ -116,7 +123,7 @@ class Asset(Base):
     content_rating = Column(String(20), nullable=True)
     
     # Status
-    status = Column(String(50), default="processing")  # processing, protected, at_risk, violated
+    status = Column(String(50), default="processing", index=True)  # processing, protected, at_risk, violated
     protection_level = Column(String(20), default="standard")  # standard, enhanced, maximum
     thumbnail_path = Column(String(1000), nullable=True)
     
@@ -133,11 +140,11 @@ class Detection(Base):
     __tablename__ = "detections"
     
     id = Column(Integer, primary_key=True, index=True)
-    asset_id = Column(Integer, ForeignKey("assets.id"), nullable=False)
+    asset_id = Column(Integer, ForeignKey("assets.id"), nullable=False, index=True)
     
     # Location
     detection_url = Column(String(2000), nullable=False)
-    platform = Column(String(100), nullable=True)  # youtube, instagram, twitter, website
+    platform = Column(String(100), nullable=True, index=True)  # youtube, instagram, twitter, website
     domain = Column(String(255), nullable=True)
     country_code = Column(String(10), nullable=True)
     latitude = Column(Float, nullable=True)
@@ -149,8 +156,8 @@ class Detection(Base):
     diff_thumbnail_path = Column(String(1000), nullable=True)
     
     # Status
-    status = Column(String(50), default="active")  # active, resolved, false_positive, dmca_sent
-    severity = Column(String(20), default="medium")  # low, medium, high, critical
+    status = Column(String(50), default="active", index=True)  # active, resolved, false_positive, dmca_sent
+    severity = Column(String(20), default="medium", index=True)  # low, medium, high, critical
     
     # Timestamps
     detected_at = Column(DateTime, server_default=func.now())

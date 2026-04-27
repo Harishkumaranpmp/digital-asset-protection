@@ -6,7 +6,7 @@ Simulates web scanning to detect unauthorized copies of assets
 import asyncio
 import hashlib
 import random
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import List, Optional
 from urllib.parse import urlparse
 
@@ -177,7 +177,7 @@ class WebCrawler:
             "similarity_score": round(similarity, 4),
             "match_type": "exact" if similarity > 0.95 else "modified" if similarity > 0.70 else "partial",
             "severity": severity,
-            "detected_at": datetime.utcnow().isoformat(),
+            "detected_at": datetime.now(timezone.utc).isoformat(),
             "country_code": random.choice(["US", "GB", "IN", "DE", "BR", "AU", "FR", "ES"]),
             "latitude": random.uniform(-60, 70),
             "longitude": random.uniform(-180, 180),

@@ -1,15 +1,12 @@
 {
   "version": 2,
-  "builds": [
+  "buildCommand": "cd frontend && npm install && npm run build",
+  "outputDirectory": "frontend/.next",
+  "installCommand": "cd frontend && npm install",
+  "rewrites": [
     {
-      "src": "app.py",
-      "use": "@vercel/python"
-    }
-  ],
-  "routes": [
-    {
-      "src": "/(.*)",
-      "dest": "app.py"
+      "source": "/(.*)",
+      "destination": "/frontend/$1"
     }
   ]
 }
