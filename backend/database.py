@@ -32,11 +32,11 @@ engine = create_engine(
     db_url,
     connect_args=connect_args,
     pool_pre_ping=True,  # Handle disconnected connections
-    pool_size=10 if not is_sqlite else None,        # Only for PostgreSQL
-    max_overflow=20 if not is_sqlite else None,     # Only for PostgreSQL
-    echo=settings.DEBUG,
-    # Force IPv4 by disabling IPv6 DNS resolution
-    pool_recycle=3600,  # Recycle connections every hour
+    pool_size=20 if not is_sqlite else None,        # Increased pool size for PostgreSQL
+    max_overflow=40 if not is_sqlite else None,     # Increased overflow for PostgreSQL
+    echo=False,  # Disable SQL logging for better performance (was: settings.DEBUG)
+    pool_recycle=1800,  # Recycle connections every 30 minutes (faster refresh)
+    pool_timeout=30,  # Timeout for getting connection from pool
 )
 
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)

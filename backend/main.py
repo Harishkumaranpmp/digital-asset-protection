@@ -10,6 +10,7 @@ from datetime import datetime, timezone
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
+from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.staticfiles import StaticFiles
 from pathlib import Path
 
@@ -101,6 +102,8 @@ Authorization: Bearer <your_token>
     lifespan=lifespan,
     docs_url="/docs",
     redoc_url="/redoc",
+    # Performance optimizations
+    openapi_url="/openapi.json",
 )
 
 
@@ -115,6 +118,13 @@ else:
     # Always allow localhost for debugging even in prod-like envs if needed
     if "http://localhost:3000" not in cors_origins:
         cors_origins.append("http://localhost:3000")
+
+# Add GZip compression FIRST (before CORS) for faster responses
+app.add_middleware(
+    GZipMiddleware,
+    minimum_size=1000,  # Compress responses larger than 1KB
+    compresslevel=6  # Balance between speed and compression (1-9)
+)
 
 app.add_middleware(
     CORSMiddleware,
