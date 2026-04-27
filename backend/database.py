@@ -14,10 +14,17 @@ from backend.config import get_settings
 
 settings = get_settings()
 
-# Create engine — SQLite for local dev
+# Create engine — Support both SQLite and PostgreSQL (Supabase)
+db_url = settings.DATABASE_URL
+if db_url.startswith("postgres://"):
+    db_url = db_url.replace("postgres://", "postgresql://", 1)
+
 engine = create_engine(
-    settings.DATABASE_URL,
-    connect_args={"check_same_thread": False} if "sqlite" in settings.DATABASE_URL else {},
+    db_url,
+    connect_args={"check_same_thread": False} if "sqlite" in db_url else {},
+    pool_pre_ping=True,  # Handle disconnected connections
+    pool_size=10,        # Increase pool for production
+    max_overflow=20,
     echo=settings.DEBUG,
 )
 

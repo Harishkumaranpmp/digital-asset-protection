@@ -41,20 +41,6 @@ def process_asset_task(asset_id: int):
         asset.dhash = fp.get("dhash")
         asset.ahash = fp.get("ahash")
         asset.hash_algorithm = "imagehash_v1" if asset.file_type == "image" else "video_hash_v1"
-
-        # ── Gemini Analysis ──
-        gemini_result = None
-        if asset.file_type == "image":
-            try:
-                from backend.ai.gemini_analyzer import GeminiAnalyzer
-                gemini = GeminiAnalyzer()
-                gemini_result = gemini.analyze_image(asset.file_path)
-                asset.gemini_classification = gemini_result
-                if gemini_result and gemini_result.get("sport_category") and not asset.sport_category:
-                    asset.sport_category = gemini_result.get("sport_category")
-            except Exception as e:
-                print(f"Gemini analysis failed: {e}")
-
         asset.status = "protected"
         
         # Trigger duplicate scan immediately against other assets in the DB

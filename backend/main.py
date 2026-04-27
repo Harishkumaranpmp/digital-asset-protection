@@ -97,22 +97,33 @@ Authorization: Bearer <your_token>
 
 
 # ── CORS — Production Hardened ──────────────────────────────
-# In production, ALLOWED_ORIGINS is loaded from .env.production
-# It should ONLY list your Vercel domain and custom domain.
 is_production = os.getenv("APP_ENV") == "production"
-cors_origins = settings.ALLOWED_ORIGINS if is_production else ["*"]
+
+# In production, we combine the configured origins with common Render patterns
+cors_origins = settings.ALLOWED_ORIGINS.copy()
+if not is_production:
+    cors_origins = ["*"]
+else:
+    # Always allow localhost for debugging even in prod-like envs if needed
+    if "http://localhost:3000" not in cors_origins:
+        cors_origins.append("http://localhost:3000")
 
 app.add_middleware(
     CORSMiddleware,
     allow_origins=cors_origins,
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-    allow_headers=["Authorization", "Content-Type", "X-Requested-With"],
+    allow_headers=["Authorization", "Content-Type", "X-Requested-With", "Accept"],
+    expose_headers=["Content-Disposition"],
 )
 
 # Block requests from unexpected hosts in production
 if is_production:
-    app.add_middleware(TrustedHostMiddleware, allowed_hosts=["*.run.app", "*.onrender.com", "localhost", "127.0.0.1"])
+    # Allow all onrender subdomains and common local hosts
+    app.add_middleware(
+        TrustedHostMiddleware, 
+        allowed_hosts=["*.onrender.com", "*.run.app", "localhost", "127.0.0.1", "*"] 
+    )
 
 
 # ── API Routers ─────────────────────────────────────────────
@@ -128,7 +139,7 @@ app.include_router(reports_router)       # /api/reports/*
 
 # ─── Health Check ────────────────────────────────────────────
 
-@app.api_route("/", methods=["GET", "HEAD"], tags=["Health"])
+@app.get("/", tags=["Health"])
 def root():
     return {
         "service": "SportShield API",

@@ -29,27 +29,54 @@ class FingerprintGenerator:
         Generate a fingerprint for a media file.
         
         Args:
-            file_path (str): Path to the uploaded media file.
-            file_type (str, optional): 'image' or 'video'. If not provided, it will be inferred.
-            
-        Returns:
-            dict: The normalized fingerprint dictionary.
+            file_path (str): Path to the uploaded media file (or URL).
+            file_type (str, optional): 'image' or 'video'.
         """
-        if not os.path.exists(file_path):
-            raise FileNotFoundError(f"File not found: {file_path}")
+        temp_file = None
+        
+        # Download if it's a URL
+        if file_path.startswith("http"):
+            import requests
+            import tempfile
+            from pathlib import Path
+            
+            ext = Path(file_path.split("?")[0]).suffix or ".tmp"
+            fd, temp_file = tempfile.mkstemp(suffix=ext)
+            os.close(fd)
+            
+            try:
+                response = requests.get(file_path, timeout=60)
+                response.raise_for_status()
+                with open(temp_file, "wb") as f:
+                    f.write(response.content)
+                file_path = temp_file
+            except Exception as e:
+                if temp_file and os.path.exists(temp_file):
+                    os.remove(temp_file)
+                raise RuntimeError(f"Failed to download asset from URL: {e}")
 
-        # Infer file type if not explicitly provided
-        if not file_type:
-            ext = file_path.lower().split('.')[-1]
-            if ext in ['mp4', 'avi', 'mov', 'mkv', 'webm']:
-                file_type = 'video'
-            elif ext in ['jpg', 'jpeg', 'png', 'webp', 'gif']:
-                file_type = 'image'
+        try:
+            if not os.path.exists(file_path):
+                raise FileNotFoundError(f"File not found: {file_path}")
+
+            # Infer file type if not explicitly provided
+            if not file_type:
+                ext = file_path.lower().split('.')[-1]
+                if ext in ['mp4', 'avi', 'mov', 'mkv', 'webm']:
+                    file_type = 'video'
+                elif ext in ['jpg', 'jpeg', 'png', 'webp', 'gif']:
+                    file_type = 'image'
+                else:
+                    raise ValueError(f"Unsupported file extension: {ext}")
+
+            # Route to appropriate model
+            if file_type == 'video':
+                result = VideoHashModel.generate(file_path)
             else:
-                raise ValueError(f"Unsupported file extension: {ext}")
-
-        # Route to appropriate model
-        if file_type == 'video':
-            return VideoHashModel.generate(file_path)
-        else:
-            return ImageHashModel.generate(file_path)
+                result = ImageHashModel.generate(file_path)
+            
+            return result
+        finally:
+            # Clean up temp file if we created one
+            if temp_file and os.path.exists(temp_file):
+                os.remove(temp_file)

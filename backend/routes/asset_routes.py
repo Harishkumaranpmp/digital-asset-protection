@@ -18,12 +18,26 @@ from sqlalchemy.orm import Session
 from backend.auth import get_current_user
 from backend.config import get_settings
 from backend.database import Asset, Alert, Detection, get_db, User
+from supabase import create_client, Client
 from backend.ai.fingerprint import FingerprintEngine
 from backend.ai.gemini_analyzer import GeminiAnalyzer
 from backend.celery_app import process_asset_task
 
+import logging
+
 router = APIRouter(prefix="/api/assets", tags=["Assets"])
 settings = get_settings()
+logger = logging.getLogger("sportshield.assets")
+
+# Initialize Supabase client if configured
+supabase: Optional[Client] = None
+if settings.SUPABASE_URL and settings.SUPABASE_KEY:
+    try:
+        supabase = create_client(settings.SUPABASE_URL, settings.SUPABASE_KEY)
+    except Exception as e:
+        logger.error(f"Failed to initialize Supabase client: {e}")
+        supabase = None
+
 fingerprint_engine = FingerprintEngine()
 gemini = GeminiAnalyzer()
 
@@ -60,10 +74,9 @@ async def upload_asset(
 
     file_type = "image" if is_image else "video"
     
-    # Check file size (FastAPI doesn't do this by default)
+    # Check file size (FastAPI supports .size in 0.100+)
     max_bytes = settings.MAX_FILE_SIZE_MB * 1024 * 1024
-    content = await file.read()
-    file_size = len(content)
+    file_size = file.size if file.size is not None else 0
     
     if file_size > max_bytes:
         raise HTTPException(
@@ -72,20 +85,50 @@ async def upload_asset(
         )
     
 
-    # Save file with UUID
+    # Save file with UUID (Local temp copy for processing)
     ext = Path(file.filename or "asset").suffix
     unique_filename = f"{uuid4().hex}{ext}"
-    file_path = os.path.join(settings.UPLOAD_DIR, unique_filename)
+    temp_file_path = os.path.join(settings.UPLOAD_DIR, unique_filename)
 
+    try:
+        with open(temp_file_path, "wb") as buffer:
+            shutil.copyfileobj(file.file, buffer)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to save temp file: {str(e)}")
 
-    with open(file_path, "wb") as f:
-        f.write(content)
+    # Upload to Supabase Storage if configured
+    final_file_path = temp_file_path
+    if supabase:
+        try:
+            bucket = settings.SUPABASE_BUCKET
+            
+            # Upload to Supabase using the local temp file path (avoids memory spike)
+            with open(temp_file_path, "rb") as f:
+                supabase.storage.from_(bucket).upload(
+                    path=unique_filename,
+                    file=f,
+                    file_options={"content-type": mime}
+                )
+            
+            # Get Public URL
+            res = supabase.storage.from_(bucket).get_public_url(unique_filename)
+            final_file_path = res
+        except Exception as e:
+            logger.warning(f"Supabase upload failed: {e}. Falling back to local storage.")
 
-    # Gemini analysis (async, non-blocking)
+    # Gemini analysis (uses local temp path)
     gemini_result = None
     if is_image:
         try:
-            gemini_result = gemini.analyze_image(file_path)
+            gemini_result = gemini.analyze_image(temp_file_path)
+        except Exception:
+            pass
+
+    # Cleanup local temp file ONLY if we successfully moved it to Supabase
+    if supabase and final_file_path.startswith("http"):
+        try:
+            if os.path.exists(temp_file_path):
+                os.remove(temp_file_path)
         except Exception:
             pass
 
@@ -106,7 +149,7 @@ async def upload_asset(
         file_type=file_type,
         mime_type=mime,
         file_size=file_size,
-        file_path=file_path,
+        file_path=final_file_path,  # Now stores Supabase URL if available
         title=title or file.filename,
         description=description,
         tags=tag_list,
@@ -114,7 +157,7 @@ async def upload_asset(
         event_name=event_name,
         gemini_classification=gemini_result,
         protection_level=protection_level,
-        status="processing", # Set to processing initially
+        status="processing",
     )
     db.add(asset)
     db.flush()
@@ -225,7 +268,11 @@ def delete_asset(
 
     # Remove file
     try:
-        if os.path.exists(asset.file_path):
+        if asset.file_path.startswith("http") and supabase:
+            # Delete from Supabase
+            bucket = settings.SUPABASE_BUCKET
+            supabase.storage.from_(bucket).remove([asset.filename])
+        elif os.path.exists(asset.file_path):
             os.remove(asset.file_path)
     except Exception:
         pass
@@ -243,7 +290,12 @@ def download_asset(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
+    from fastapi.responses import RedirectResponse
     asset = _get_asset_or_404(asset_id, current_user, db)
+    
+    if asset.file_path.startswith("http"):
+        return RedirectResponse(asset.file_path)
+        
     if not os.path.exists(asset.file_path):
         raise HTTPException(status_code=404, detail="File not found on disk")
     return FileResponse(asset.file_path, filename=asset.original_filename)

@@ -32,6 +32,7 @@ class YouTubeCrawler:
                                 'duration': entry.get('duration'),
                                 'view_count': entry.get('view_count'),
                                 'uploader': entry.get('uploader'),
+                                'thumbnail': entry.get('thumbnail'),
                                 'platform': 'youtube',
                                 'domain': 'youtube.com'
                             })

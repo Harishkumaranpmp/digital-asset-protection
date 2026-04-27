@@ -45,6 +45,11 @@ class Settings(BaseSettings):
     
     # CORS
     ALLOWED_ORIGINS: list = ["http://localhost:3000", "http://localhost:3001"]
+
+    # Supabase (for Storage & Database)
+    SUPABASE_URL: str = ""
+    SUPABASE_KEY: str = ""
+    SUPABASE_BUCKET: str = "assets"
     
     # Rate Limiting
     RATE_LIMIT_REQUESTS: int = 100
