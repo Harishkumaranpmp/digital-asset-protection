@@ -28,16 +28,22 @@ if not is_sqlite:
     # Force IPv4 connection (Render doesn't support IPv6 outbound)
     connect_args["hostaddr"] = None  # Will be resolved as IPv4
 
-engine = create_engine(
-    db_url,
-    connect_args=connect_args,
-    pool_pre_ping=True,  # Handle disconnected connections
-    pool_size=20 if not is_sqlite else None,        # Increased pool size for PostgreSQL
-    max_overflow=40 if not is_sqlite else None,     # Increased overflow for PostgreSQL
-    echo=False,  # Disable SQL logging for better performance (was: settings.DEBUG)
-    pool_recycle=1800,  # Recycle connections every 30 minutes (faster refresh)
-    pool_timeout=30,  # Timeout for getting connection from pool
-)
+# Engine arguments
+engine_args = {
+    "connect_args": connect_args,
+    "pool_pre_ping": True,
+    "echo": False,
+}
+
+if not is_sqlite:
+    engine_args.update({
+        "pool_size": 20,
+        "max_overflow": 40,
+        "pool_recycle": 1800,
+        "pool_timeout": 30,
+    })
+
+engine = create_engine(db_url, **engine_args)
 
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()

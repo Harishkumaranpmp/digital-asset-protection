@@ -3,22 +3,21 @@ SportShield — API Routes: Assets
 Handles file upload, fingerprinting, metadata, and asset management
 """
 
-import json
+import logging
 import os
 import shutil
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import List, Optional
 from uuid import uuid4
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, Request
 from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 
 from backend.auth import get_current_user
 from backend.config import get_settings
 from backend.database import Asset, Alert, Detection, get_db, User
-from supabase import create_client, Client
 from backend.ai.fingerprint import FingerprintEngine
 from backend.ai.gemini_analyzer import GeminiAnalyzer
 from backend.celery_app import process_asset_task
@@ -29,17 +28,11 @@ router = APIRouter(prefix="/api/assets", tags=["Assets"])
 settings = get_settings()
 logger = logging.getLogger("sportshield.assets")
 
-# Initialize Supabase client if configured
-supabase: Optional[Client] = None
-if settings.SUPABASE_URL and settings.SUPABASE_KEY:
-    try:
-        supabase = create_client(settings.SUPABASE_URL, settings.SUPABASE_KEY)
-    except Exception as e:
-        logger.error(f"Failed to initialize Supabase client: {e}")
-        supabase = None
-
 fingerprint_engine = FingerprintEngine()
 gemini = GeminiAnalyzer()
+
+def _get_base_url(request: Request):
+    return str(request.base_url).rstrip("/")
 
 
 def _ensure_upload_dir():
@@ -51,10 +44,11 @@ def _ensure_upload_dir():
 
 @router.post("/upload", status_code=201)
 async def upload_asset(
+    request: Request,
     file: UploadFile = File(...),
     title: Optional[str] = Form(None),
     description: Optional[str] = Form(None),
-    tags: Optional[str] = Form(None),  # JSON string
+    tags: Optional[str] = Form(None),
     sport_category: Optional[str] = Form(None),
     event_name: Optional[str] = Form(None),
     protection_level: str = Form("standard"),
@@ -85,53 +79,39 @@ async def upload_asset(
         )
     
 
-    # Save file with UUID (Local temp copy for processing)
+    # Save file with UUID (Absolute path for reliability)
     ext = Path(file.filename or "asset").suffix
     unique_filename = f"{uuid4().hex}{ext}"
-    temp_file_path = os.path.join(settings.UPLOAD_DIR, unique_filename)
+    upload_dir = os.path.abspath(settings.UPLOAD_DIR)
+    os.makedirs(upload_dir, exist_ok=True)
+    file_path = os.path.join(upload_dir, unique_filename)
 
     try:
-        with open(temp_file_path, "wb") as buffer:
+        with open(file_path, "wb") as buffer:
             shutil.copyfileobj(file.file, buffer)
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to save temp file: {str(e)}")
+        logger.error(f"Upload failed: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to save file: {str(e)}")
 
-    # Upload to Supabase Storage if configured
-    final_file_path = temp_file_path
-    if supabase:
-        try:
-            bucket = settings.SUPABASE_BUCKET
-            
-            # Upload to Supabase using the local temp file path (avoids memory spike)
-            with open(temp_file_path, "rb") as f:
-                supabase.storage.from_(bucket).upload(
-                    path=unique_filename,
-                    file=f,
-                    file_options={"content-type": mime}
-                )
-            
-            # Get Public URL
-            res = supabase.storage.from_(bucket).get_public_url(unique_filename)
-            final_file_path = res
-        except Exception as e:
-            logger.warning(f"Supabase upload failed: {e}. Falling back to local storage.")
-
-    # Gemini analysis (uses local temp path)
+    # Fingerprinting & Analysis
+    phash, dhash, ahash, watermark_id = None, None, None, None
     gemini_result = None
+    status = "processing"
+
     if is_image:
         try:
-            gemini_result = gemini.analyze_image(temp_file_path)
-        except Exception:
-            pass
-
-    # Cleanup local temp file ONLY if we successfully moved it to Supabase
-    if supabase and final_file_path.startswith("http"):
-        try:
-            if os.path.exists(temp_file_path):
-                os.remove(temp_file_path)
-        except Exception:
-            pass
-
+            # Sync fingerprinting for images (fast)
+            fp = fingerprint_engine.generate_image_fingerprint(file_path)
+            phash = fp.get("phash")
+            dhash = fp.get("dhash")
+            ahash = fp.get("ahash")
+            watermark_id = fingerprint_engine.generate_watermark_id()
+            status = "protected"
+            
+            # Gemini analysis
+            gemini_result = gemini.analyze_image(file_path)
+        except Exception as e:
+            logger.warning(f"Fingerprinting/Analysis failed: {e}")
     # Parse tags
     tag_list = []
     if tags:
@@ -140,7 +120,7 @@ async def upload_asset(
         except Exception:
             tag_list = [t.strip() for t in tags.split(",") if t.strip()]
 
-    # Create DB record in processing state
+    # Create DB record
     asset = Asset(
         user_id=current_user.id,
         org_id=current_user.org_id,
@@ -149,7 +129,11 @@ async def upload_asset(
         file_type=file_type,
         mime_type=mime,
         file_size=file_size,
-        file_path=final_file_path,  # Now stores Supabase URL if available
+        file_path=file_path,
+        phash=phash,
+        dhash=dhash,
+        ahash=ahash,
+        watermark_id=watermark_id,
         title=title or file.filename,
         description=description,
         tags=tag_list,
@@ -157,57 +141,30 @@ async def upload_asset(
         event_name=event_name,
         gemini_classification=gemini_result,
         protection_level=protection_level,
-        status="processing",
+        status=status,
     )
     db.add(asset)
     db.flush()
 
-    # Create alert
-    alert = Alert(
-        user_id=current_user.id,
-        alert_type="asset_uploaded",
-        severity="info",
-        title="Asset Processing Started",
-        message=f"'{asset.title}' is being fingerprinted in the background.",
-        alert_metadata={"asset_id": asset.id}
-    )
-    db.add(alert)
+    # If it's a video, or if we want background duplicate detection, enqueue task
+    if is_video or status == "processing":
+        try:
+            process_asset_task.delay(asset.id)
+        except Exception as e:
+            logger.warning(f"Background task failed to enqueue: {e}. Running fallback if needed.")
+            # For images we already fingerprinted, we don't strictly need the task unless for duplicate detection
+    
     db.commit()
     db.refresh(asset)
-    
-    # Enqueue Celery task with a synchronous fallback for demo/environments without Redis
-    try:
-        process_asset_task.delay(asset.id)
-    except Exception as e:
-        print(f"Warning: Failed to enqueue celery task: {e}. Running synchronously...")
-        # If background processing fails, we run it synchronously so the user isn't stuck "Processing"
-        try:
-            process_asset_task(asset.id)
-        except Exception as se:
-            print(f"Critical: Synchronous processing failed: {se}")
 
-    return {
-        "id": asset.id,
-        "filename": asset.filename,
-        "original_filename": asset.original_filename,
-        "file_type": asset.file_type,
-        "file_size": asset.file_size,
-        "fingerprint": {
-            "phash": asset.phash,
-            "dhash": asset.dhash,
-            "ahash": asset.ahash,
-            "watermark_id": asset.watermark_id,
-        },
-        "gemini_analysis": gemini_result,
-        "status": asset.status,
-        "created_at": asset.created_at,
-    }
+    return _format_asset(asset, db, request=request, detailed=True)
 
 
 # ─── List Assets ──────────────────────────────────────────────
 
 @router.get("/")
 def list_assets(
+    request: Request,
     skip: int = 0,
     limit: int = 20,
     status: Optional[str] = None,
@@ -236,7 +193,7 @@ def list_assets(
 
     return {
         "total": total,
-        "assets": [_format_asset(a, db) for a in assets],
+        "assets": [_format_asset(a, db, request=request) for a in assets],
         "skip": skip,
         "limit": limit,
     }
@@ -247,12 +204,13 @@ def list_assets(
 @router.get("/{asset_id}")
 def get_asset(
     asset_id: int,
+    request: Request,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
     """Get detailed info on a specific asset."""
     asset = _get_asset_or_404(asset_id, current_user, db)
-    return _format_asset(asset, db, detailed=True)
+    return _format_asset(asset, db, request=request, detailed=True)
 
 
 # ─── Delete Asset ─────────────────────────────────────────────
@@ -268,11 +226,7 @@ def delete_asset(
 
     # Remove file
     try:
-        if asset.file_path.startswith("http") and supabase:
-            # Delete from Supabase
-            bucket = settings.SUPABASE_BUCKET
-            supabase.storage.from_(bucket).remove([asset.filename])
-        elif os.path.exists(asset.file_path):
+        if os.path.exists(asset.file_path):
             os.remove(asset.file_path)
     except Exception:
         pass
@@ -293,9 +247,6 @@ def download_asset(
     from fastapi.responses import RedirectResponse
     asset = _get_asset_or_404(asset_id, current_user, db)
     
-    if asset.file_path.startswith("http"):
-        return RedirectResponse(asset.file_path)
-        
     if not os.path.exists(asset.file_path):
         raise HTTPException(status_code=404, detail="File not found on disk")
     return FileResponse(asset.file_path, filename=asset.original_filename)
@@ -350,14 +301,25 @@ def _get_asset_or_404(asset_id: int, user: User, db: Session) -> Asset:
     return asset
 
 
-def _format_asset(asset: Asset, db: Session, detailed: bool = False) -> dict:
+def _format_asset(asset: Asset, db: Session, request: Request = None, detailed: bool = False) -> dict:
     detections_count = db.query(Detection).filter(Detection.asset_id == asset.id).count()
+    
+    # Generate public URL for the file
+    file_url = None
+    if asset.file_path:
+        if asset.file_path.startswith("http"):
+            file_url = asset.file_path
+        elif request:
+            base_url = _get_base_url(request)
+            file_url = f"{base_url}/uploads/{asset.filename}"
+
     result = {
         "id": asset.id,
         "filename": asset.filename,
         "original_filename": asset.original_filename,
         "file_type": asset.file_type,
         "file_size": asset.file_size,
+        "file_url": file_url,
         "title": asset.title,
         "description": asset.description,
         "tags": asset.tags,
@@ -366,15 +328,17 @@ def _format_asset(asset: Asset, db: Session, detailed: bool = False) -> dict:
         "status": asset.status,
         "protection_level": asset.protection_level,
         "detections_count": detections_count,
-        "watermark_id": asset.watermark_id,
+        "fingerprint": {
+            "phash": asset.phash,
+            "dhash": asset.dhash,
+            "ahash": asset.ahash,
+            "watermark_id": asset.watermark_id,
+        },
         "created_at": asset.created_at,
         "updated_at": asset.updated_at,
     }
     if detailed:
         result.update({
-            "phash": asset.phash,
-            "dhash": asset.dhash,
-            "ahash": asset.ahash,
             "gemini_classification": asset.gemini_classification,
         })
     return result

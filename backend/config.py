@@ -35,6 +35,7 @@ class Settings(BaseSettings):
     
     # Redis (for Celery, optional)
     REDIS_URL: str = "redis://localhost:6379/0"
+    CELERY_ALWAYS_EAGER: bool = False
     
     # SMTP (for Legal Enforcement)
     SMTP_SERVER: str = "smtp.gmail.com"
@@ -46,11 +47,6 @@ class Settings(BaseSettings):
     # CORS
     ALLOWED_ORIGINS: list = ["http://localhost:3000", "http://localhost:3001"]
 
-    # Supabase (for Storage & Database)
-    SUPABASE_URL: str = ""
-    SUPABASE_KEY: str = ""
-    SUPABASE_BUCKET: str = "assets"
-    
     # Rate Limiting
     RATE_LIMIT_REQUESTS: int = 100
     RATE_LIMIT_WINDOW_SECONDS: int = 60

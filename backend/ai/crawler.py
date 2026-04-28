@@ -209,3 +209,29 @@ class WebCrawler:
 
     async def close(self):
         await self.web_scraper.close()
+    
+    def scan_for_asset(self, asset):
+        """
+        Synchronous wrapper for scan_asset - used when Redis/Celery is not available.
+        Returns list of detection results.
+        """
+        import asyncio
+        
+        # Create event loop for synchronous execution
+        try:
+            loop = asyncio.get_event_loop()
+        except RuntimeError:
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+        
+        # Run the async scan
+        results = loop.run_until_complete(
+            self.scan_asset(
+                asset_id=asset.id,
+                phash=asset.phash or "",
+                title=asset.title,
+                tags=asset.tags if isinstance(asset.tags, list) else None,
+            )
+        )
+        
+        return results

@@ -24,3 +24,9 @@ build/
 # Logs
 logs/
 *.log
+
+# Data & Uploads
+uploads/
+scratch/
+celery_data/
+*.db

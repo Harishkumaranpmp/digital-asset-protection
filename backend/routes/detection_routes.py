@@ -243,12 +243,37 @@ async def trigger_scan(
     if not asset:
         raise HTTPException(status_code=404, detail="Asset not found")
 
-    # Enqueue background scan
+    # Try to use Celery, fallback to synchronous if Redis is not available
+    scan_started = False
     try:
         run_platform_scan_task.delay(asset.id)
+        scan_started = True
     except Exception as e:
-        print(f"Warning: Failed to enqueue scan task: {e}")
-        raise HTTPException(status_code=500, detail="Failed to start scan")
+        print(f"Redis not available, running scan synchronously: {e}")
+        # Run scan synchronously as fallback
+        try:
+            crawler = WebCrawler()
+            results = crawler.scan_for_asset(asset)
+            
+            # Save detection results
+            for result in results:
+                detection = Detection(
+                    asset_id=asset.id,
+                    detection_url=result.get("url", ""),
+                    platform=result.get("platform", "unknown"),
+                    domain=result.get("domain", ""),
+                    similarity_score=result.get("similarity", 0.8),
+                    match_type=result.get("match_type", "partial"),
+                    severity="high" if result.get("similarity", 0) > 0.9 else "medium",
+                    status="active",
+                )
+                db.add(detection)
+            
+            db.commit()
+            scan_started = True
+        except Exception as scan_error:
+            print(f"Scan failed: {scan_error}")
+            raise HTTPException(status_code=500, detail=f"Scan failed: {str(scan_error)}")
 
     # Create alert
     alert = Alert(
@@ -264,7 +289,7 @@ async def trigger_scan(
 
     return {
         "scanned": True,
-        "message": "Scan has been started in the background.",
+        "message": "Scan completed successfully." if not scan_started else "Scan has been started in the background.",
     }
 
 

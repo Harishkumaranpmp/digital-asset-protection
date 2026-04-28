@@ -17,6 +17,10 @@ celery_app.conf.update(
     timezone="UTC",
     enable_utc=True,
     task_track_started=True,
+    broker_connection_retry_on_startup=False,
+    broker_transport_options={'max_retries': 1, 'interval_start': 0, 'interval_step': 0, 'interval_max': 0},
+    result_backend_transport_options={'max_retries': 1},
+    task_always_eager=settings.CELERY_ALWAYS_EAGER,
 )
 
 @celery_app.task(name="process_asset_task")
@@ -37,13 +41,20 @@ def process_asset_task(asset_id: int):
         if not asset:
             return {"status": "error", "message": f"Asset {asset_id} not found"}
 
-        # Generate fingerprint using the new orchestrator
-        fp = FingerprintGenerator.generate(asset.file_path, asset.file_type)
+        # Generate fingerprint using FingerprintEngine
+        from backend.ai.fingerprint import FingerprintEngine
+        engine = FingerprintEngine()
+        
+        if asset.file_type == "image":
+            fp = engine.generate_image_fingerprint(asset.file_path)
+        else:
+            fp = engine.generate_video_fingerprint(asset.file_path)
 
         asset.phash = fp.get("phash")
         asset.dhash = fp.get("dhash")
         asset.ahash = fp.get("ahash")
-        asset.hash_algorithm = "imagehash_v1" if asset.file_type == "image" else "video_hash_v1"
+        asset.watermark_id = fp.get("watermark_id") or engine.generate_watermark_id()
+        asset.hash_algorithm = "fingerprint_engine_v1"
         asset.status = "protected"
         
         # Generate thumbnail for videos

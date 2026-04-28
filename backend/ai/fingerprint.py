@@ -28,7 +28,8 @@ try:
     from sentence_transformers import SentenceTransformer
     # Initialize model lazily
     clip_model = None
-    TRANSFORMERS_AVAILABLE = True
+    # Set to False to avoid heavy downloads in demo environment
+    TRANSFORMERS_AVAILABLE = False
 except ImportError:
     TRANSFORMERS_AVAILABLE = False
 
